@@ -1,0 +1,20 @@
+# Entorno virtual de Python
+.venv/
+venv/
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Variables de entorno locales (pueden tener secretos)
+.env
+
+# Base de datos local (se genera al ejecutar)
+*.db
+*.sqlite3
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

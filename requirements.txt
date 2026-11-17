@@ -1,0 +1,6 @@
+# Dependencias del proyecto con versiones fijas (instalación reproducible).
+# Requiere Python 3.10 o superior.
+fastapi==0.163.1
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.8
+python-dotenv==1.2.4
