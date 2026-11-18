@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reportes de coordinación</title>
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="js/api.js"></script>
+</head>
+<body>
+  <nav id="menu"></nav>
+  <main>
+    <section class="portada">
+      <span class="etiqueta-superior">Coordinación académica</span>
+      <h1>📊 Información consolidada</h1>
+      <p>Porcentaje de asistencia por actividad y por periodo (mes). Asistencia = asistieron ÷ inscritos activos.</p>
+    </section>
+    <div id="mensaje" hidden></div>
+
+    <form class="filtros formulario-filtros" id="form-filtros">
+      <label>Desde <input type="date" name="desde"></label>
+      <label>Hasta <input type="date" name="hasta"></label>
+      <button type="submit">🔎 Filtrar</button>
+      <button type="button" class="secundario" onclick="limpiar()">Limpiar</button>
+    </form>
+
+    <div class="indicadores" id="indicadores"></div>
+
+    <div class="dos-columnas">
+      <section class="panel">
+        <h2 style="margin-top:0">📅 Asistencia por periodo <small style="font-weight:600;color:var(--suave);font-size:.8rem">(eventos ya realizados)</small></h2>
+        <div class="grafica" id="grafica" role="list"></div>
+      </section>
+      <section class="panel">
+        <h2 style="margin-top:0">🏆 Actividades con mejor asistencia</h2>
+        <div id="ranking"></div>
+        <div class="leyenda-niveles">
+          <span class="porcentaje-pill bueno">▲ 80% o más</span>
+          <span class="porcentaje-pill medio">● 50% a 79%</span>
+          <span class="porcentaje-pill bajo">▼ menos de 50%</span>
+        </div>
+      </section>
+    </div>
+
+    <h2>📋 Detalle por actividad</h2>
+    <div class="tabla-contenedor">
+      <table>
+        <thead>
+          <tr><th>Actividad</th><th>Fecha</th><th>Organizador</th><th>Estado</th><th>Cupo</th><th>Inscritos</th><th>Disponibles</th><th>Asistieron</th><th>No asistieron</th><th>Sin registro</th><th>% asistencia</th></tr>
+        </thead>
+        <tbody id="filas"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    exigirRol("COORDINACION");
+
+    const NOMBRES_MES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    function nombrePeriodo(periodo) {
+      const [a, m] = periodo.split("-");
+      return { mes: NOMBRES_MES[Number(m) - 1] || periodo, anio: a };
+    }
+
+    // Píldora de porcentaje: color + símbolo + número (nunca solo color).
+    function pildora(valor, hayDatos = true) {
+      if (!hayDatos) return `<span class="porcentaje-pill nulo">— sin datos</span>`;
+      const nivel = valor >= 80 ? ["bueno", "▲"] : valor >= 50 ? ["medio", "●"] : ["bajo", "▼"];
+      return `<span class="porcentaje-pill ${nivel[0]}">${nivel[1]} ${valor}%</span>`;
+    }
+
+    async function cargar() {
+      const parametros = new URLSearchParams();
+      const form = document.getElementById("form-filtros");
+      if (form.desde.value) parametros.set("desde", form.desde.value);
+      if (form.hasta.value) parametros.set("hasta", form.hasta.value);
+      try {
+        const [porEvento, porPeriodo] = await Promise.all([
+          api("/api/reportes/eventos?" + parametros),
+          api("/api/reportes/periodos?" + parametros),
+        ]);
+
+        const suma = (lista, campo) => lista.reduce((t, x) => t + x[campo], 0);
+        const inscritos = suma(porPeriodo, "inscritos");
+        const asistieron = suma(porPeriodo, "asistieron");
+        document.getElementById("indicadores").innerHTML = [
+          ["🗓️", "violeta", porEvento.length, "Actividades"],
+          ["🚫", "rojo", porEvento.filter((e) => e.estado === "CANCELADO").length, "Canceladas"],
+          ["👥", "cian", suma(porEvento, "inscritos"), "Inscripciones activas"],
+          ["✅", "verde", suma(porEvento, "asistieron"), "Asistencias registradas"],
+          ["📈", "destacado", inscritos ? (asistieron * 100 / inscritos).toFixed(1) + "%" : "—", "% asistencia (realizados)"],
+        ].map(([ic, c, v, n]) => `<div class="indicador ${c}"><div class="icono">${ic}</div><div><div class="valor">${v}</div><div class="nombre">${n}</div></div></div>`).join("");
+
+        // Gráfica de barras: una sola serie (% por mes), un solo color, con detalle al pasar el mouse.
+        document.getElementById("grafica").innerHTML = porPeriodo.length
+          ? porPeriodo.map((p) => {
+              const { mes, anio } = nombrePeriodo(p.periodo);
+              return `
+              <div class="fila" role="listitem">
+                <span class="periodo">${mes}<small>${anio}</small></span>
+                <div class="pista">
+                  <div class="relleno" style="width:${p.porcentaje_asistencia}%"></div>
+                  <span class="tooltip">${p.eventos} eventos · ${p.inscritos} inscritos · ${p.asistieron} asistieron</span>
+                </div>
+                <span class="porcentaje">${p.porcentaje_asistencia}%</span>
+                <span class="detalle">${p.eventos} eventos · ${p.inscritos} inscritos · ${p.asistieron} asistieron</span>
+              </div>`;
+            }).join("")
+          : `<p class="vacio"><span class="emoji">📭</span>No hay eventos realizados en el rango.</p>`;
+
+        const conInscritos = porEvento
+          .filter((e) => e.inscritos > 0 && e.estado !== "CANCELADO" && e.asistieron + e.no_asistieron > 0)
+          .sort((a, b) => b.porcentaje_asistencia - a.porcentaje_asistencia)
+          .slice(0, 5);
+        document.getElementById("ranking").innerHTML = conInscritos.length
+          ? `<table><tbody>${conInscritos.map((e, i) => `
+              <tr>
+                <td style="width:34px;font-weight:800;color:var(--suave)">${["🥇", "🥈", "🥉"][i] || i + 1}</td>
+                <td><strong>${escapar(e.titulo)}</strong><span class="secundario-texto">${formatoFecha(e.fecha)} · ${e.asistieron} de ${e.inscritos} asistieron</span></td>
+                <td style="text-align:right">${pildora(e.porcentaje_asistencia)}</td>
+              </tr>`).join("")}</tbody></table>`
+          : `<p class="vacio"><span class="emoji">🏁</span>Aún no hay asistencia registrada en el rango.</p>`;
+
+        document.getElementById("filas").innerHTML = porEvento.length
+          ? porEvento.map((e) => `
+            <tr>
+              <td><strong>${escapar(e.titulo)}</strong><br><span class="tipo tipo-${e.tipo.toLowerCase()}">${nombreTipo(e.tipo)}</span></td>
+              <td>${formatoFecha(e.fecha)}</td>
+              <td>${escapar(e.organizador)}</td>
+              <td>${etiquetaEstado(e.estado)}</td>
+              <td>${e.cupo}</td><td>${e.inscritos}</td><td>${e.cupos_disponibles}</td>
+              <td>${e.asistieron}</td><td>${e.no_asistieron}</td><td>${e.sin_registro}</td>
+              <td>${pildora(e.porcentaje_asistencia, e.asistieron + e.no_asistieron > 0)}</td>
+            </tr>`).join("")
+          : `<tr><td colspan="11" class="vacio">No hay actividades en el rango.</td></tr>`;
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    }
+
+    function limpiar() {
+      document.getElementById("form-filtros").reset();
+      cargar();
+    }
+
+    document.getElementById("form-filtros").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      cargar();
+    });
+    cargar();
+  </script>
+</body>
+</html>

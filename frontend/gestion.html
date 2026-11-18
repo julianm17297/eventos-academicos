@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestión de eventos</title>
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="js/api.js"></script>
+</head>
+<body>
+  <nav id="menu"></nav>
+  <main>
+    <div class="encabezado">
+      <div>
+        <h1>🗂️ Gestión de eventos</h1>
+        <p class="subtitulo" id="descripcion-rol"></p>
+      </div>
+      <button id="boton-nuevo" onclick="abrirFormulario()" hidden>＋ Crear evento</button>
+    </div>
+    <div id="mensaje" hidden></div>
+
+    <div class="indicadores" id="indicadores"></div>
+
+    <div id="zona-formulario" class="panel panel-formulario" hidden>
+      <h2 id="titulo-formulario">✨ Nuevo evento</h2>
+      <form id="form-evento" class="formulario">
+        <label class="ancho">Título <input name="titulo" required minlength="3" maxlength="150" placeholder="Ej.: Taller de diseño de APIs"></label>
+        <label>Tipo
+          <select name="tipo" required>
+            <option value="CONFERENCIA">🎤 Conferencia</option>
+            <option value="TALLER">🛠️ Taller</option>
+            <option value="SEMINARIO">📚 Seminario</option>
+            <option value="CAPACITACION">🩺 Capacitación</option>
+          </select>
+        </label>
+        <label>Lugar <input name="lugar" required placeholder="Ej.: Auditorio principal"></label>
+        <label>Cupo máximo <input name="cupo" type="number" min="1" max="1000" required></label>
+        <label>Fecha del evento <input name="fecha" type="date" required></label>
+        <label>Hora de inicio <input name="hora_inicio" type="time" required></label>
+        <label>Hora de fin <input name="hora_fin" type="time" required></label>
+        <label>Fecha límite de inscripción <input name="fecha_limite_inscripcion" type="date" required></label>
+        <label class="ancho">Descripción <textarea name="descripcion" maxlength="2000" placeholder="¿De qué trata la actividad?"></textarea></label>
+        <div class="ancho" style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="submit">💾 Guardar</button>
+          <button type="button" class="secundario" onclick="cerrarFormulario()">Cancelar</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="filtros" id="filtros-estado">
+      <div class="chips">
+        <button class="chip activo" data-estado="">Todos</button>
+        <button class="chip" data-estado="BORRADOR">📝 Borradores</button>
+        <button class="chip" data-estado="PUBLICADO">📢 Publicados</button>
+        <button class="chip" data-estado="CANCELADO">🚫 Cancelados</button>
+      </div>
+    </div>
+
+    <div class="tabla-contenedor">
+      <table>
+        <thead>
+          <tr><th>Evento</th><th>Horario</th><th>Organizador</th><th>Estado</th><th>Ocupación</th><th>Acciones</th></tr>
+        </thead>
+        <tbody id="filas"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const usuario = exigirRol("ORGANIZADOR", "COORDINACION");
+    let eventos = [];
+    let editandoId = null;
+    let filtroEstado = "";
+
+    document.getElementById("descripcion-rol").textContent =
+      usuario.rol === "COORDINACION"
+        ? "Como coordinación puede consultar, modificar y cancelar todos los eventos."
+        : "Como organizador puede crear, publicar, modificar y cancelar sus propios eventos, y registrar asistencia.";
+    document.getElementById("boton-nuevo").hidden = usuario.rol !== "ORGANIZADOR";
+
+    function pintarIndicadores() {
+      const contar = (estado) => eventos.filter((e) => e.estado === estado).length;
+      document.getElementById("indicadores").innerHTML = [
+        ["🗂️", "violeta", eventos.length, "Eventos en total"],
+        ["📝", "naranja", contar("BORRADOR"), "En borrador"],
+        ["📢", "verde", contar("PUBLICADO"), "Publicados"],
+        ["🚫", "rojo", contar("CANCELADO"), "Cancelados"],
+        ["👥", "cian", eventos.reduce((t, e) => t + e.inscritos, 0), "Inscripciones activas"],
+      ].map(([ic, c, v, n]) => `<div class="indicador ${c}"><div class="icono">${ic}</div><div><div class="valor">${v}</div><div class="nombre">${n}</div></div></div>`).join("");
+    }
+
+    function pintarTabla() {
+      const filas = document.getElementById("filas");
+      const lista = filtroEstado ? eventos.filter((e) => e.estado === filtroEstado) : eventos;
+      if (!lista.length) {
+        filas.innerHTML = `<tr><td colspan="6" class="vacio"><span class="emoji">🗓️</span>${
+          eventos.length ? "No hay eventos con ese estado." : "No hay eventos. Cree el primero con «Crear evento»."
+        }</td></tr>`;
+        return;
+      }
+      filas.innerHTML = lista.map((e) => {
+        const acciones = [];
+        if (e.estado === "BORRADOR") acciones.push(`<button class="exito pequeno" onclick="publicar(${e.id})">📢 Publicar</button>`);
+        if (e.estado !== "CANCELADO") acciones.push(`<button class="secundario pequeno" onclick="abrirFormulario(${e.id})">✏️ Editar</button>`);
+        if (e.estado !== "BORRADOR") acciones.push(`<a class="boton-enlace pequeno" href="asistencia.html?evento=${e.id}">👥 Participantes y asistencia</a>`);
+        if (e.estado !== "CANCELADO") acciones.push(`<button class="peligro pequeno" onclick="cancelarEvento(${e.id})">Cancelar evento</button>`);
+        const { dia, mes } = partesFecha(e.fecha);
+        const ocupacion = Math.min(100, Math.round((e.inscritos / e.cupo) * 100));
+        return `
+          <tr>
+            <td>
+              <div class="celda-evento">
+                <div class="mini-fecha tipo-${e.tipo.toLowerCase()}"><b>${dia}</b><span>${mes}</span></div>
+                <div><strong>${escapar(e.titulo)}</strong><span class="secundario-texto">${nombreTipo(e.tipo)} · 📍 ${escapar(e.lugar)}</span></div>
+              </div>
+            </td>
+            <td>${formatoFecha(e.fecha)}<span class="secundario-texto">🕒 ${formatoHora(e.hora_inicio)} – ${formatoHora(e.hora_fin)}</span></td>
+            <td><div class="persona-celda"><span class="avatar">${iniciales(e.organizador.nombre)}</span>${escapar(e.organizador.nombre)}</div></td>
+            <td>${etiquetaEstado(e.estado)}${e.estado === "BORRADOR" ? `<span class="secundario-texto">No visible en el catálogo</span>` : ""}</td>
+            <td class="ocupacion"><strong>${e.inscritos}</strong> / ${e.cupo}
+              <div class="barra ${nivelOcupacion(e.inscritos, e.cupo)}"><div style="width:${ocupacion}%"></div></div>
+            </td>
+            <td><div class="acciones">${acciones.join("")}</div></td>
+          </tr>`;
+      }).join("");
+    }
+
+    async function cargar() {
+      try {
+        eventos = await api("/api/gestion/eventos");
+        pintarIndicadores();
+        pintarTabla();
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    }
+
+    function abrirFormulario(id = null) {
+      editandoId = id;
+      const form = document.getElementById("form-evento");
+      form.reset();
+      document.getElementById("titulo-formulario").textContent = id ? "✏️ Modificar evento" : "✨ Nuevo evento";
+      if (id) {
+        const e = eventos.find((x) => x.id === id);
+        for (const campo of ["titulo", "tipo", "lugar", "cupo", "fecha", "fecha_limite_inscripcion", "descripcion"]) {
+          form.elements[campo].value = e[campo];
+        }
+        form.elements.hora_inicio.value = formatoHora(e.hora_inicio);
+        form.elements.hora_fin.value = formatoHora(e.hora_fin);
+      }
+      document.getElementById("zona-formulario").hidden = false;
+      document.getElementById("zona-formulario").scrollIntoView({ behavior: "smooth" });
+    }
+
+    function cerrarFormulario() {
+      document.getElementById("zona-formulario").hidden = true;
+      editandoId = null;
+    }
+
+    document.getElementById("form-evento").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const datos = Object.fromEntries(new FormData(ev.target));
+      datos.cupo = Number(datos.cupo);
+      try {
+        if (editandoId) {
+          await api(`/api/eventos/${editandoId}`, { metodo: "PUT", datos });
+          mostrarMensaje("Evento modificado correctamente.");
+        } else {
+          await api("/api/eventos", { metodo: "POST", datos });
+          mostrarMensaje("Evento creado en estado Borrador. Use «📢 Publicar» para que aparezca en el catálogo.");
+        }
+        cerrarFormulario();
+        cargar();
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    });
+
+    async function publicar(id) {
+      try {
+        await api(`/api/eventos/${id}/publicar`, { metodo: "PATCH" });
+        mostrarMensaje("Evento publicado: ya aparece en el catálogo.");
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+      cargar();
+    }
+
+    async function cancelarEvento(id) {
+      if (!confirm("¿Seguro que desea cancelar este evento? Ya no admitirá inscripciones.")) return;
+      try {
+        await api(`/api/eventos/${id}/cancelar`, { metodo: "PATCH" });
+        mostrarMensaje("Evento cancelado.");
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+      cargar();
+    }
+
+    document.querySelector("#filtros-estado .chips").addEventListener("click", (ev) => {
+      const chip = ev.target.closest(".chip");
+      if (!chip) return;
+      filtroEstado = chip.dataset.estado;
+      document.querySelectorAll("#filtros-estado .chip").forEach((c) => c.classList.toggle("activo", c === chip));
+      pintarTabla();
+    });
+
+    cargar();
+  </script>
+</body>
+</html>
