@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Participantes y asistencia</title>
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="js/api.js"></script>
+</head>
+<body>
+  <nav id="menu"></nav>
+  <main>
+    <a class="volver" href="gestion.html">← Volver a gestión de eventos</a>
+
+    <section class="ficha-evento" id="ficha">
+      <div class="fecha-bloque"><b id="ficha-dia"></b><span id="ficha-mes"></span></div>
+      <div style="flex:1;min-width:240px">
+        <span class="chip-tipo" id="ficha-tipo"></span>
+        <h1 id="titulo">Participantes y asistencia</h1>
+        <p id="detalle"></p>
+      </div>
+    </section>
+
+    <div class="aviso-regla">💡 La asistencia se registra el día del evento, solo para inscripciones activas, y puede corregirse después.</div>
+    <div id="mensaje" hidden></div>
+
+    <div class="indicadores" id="indicadores"></div>
+
+    <div class="tabla-contenedor">
+      <table>
+        <thead>
+          <tr><th>Participante</th><th>Documento</th><th>Correo</th><th>Inscripción</th><th>Asistencia</th><th>Registrar / corregir</th></tr>
+        </thead>
+        <tbody id="filas"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    exigirRol("ORGANIZADOR", "COORDINACION");
+    const eventoId = new URLSearchParams(location.search).get("evento");
+
+    async function cargar() {
+      try {
+        const { evento, participantes } = await api(`/api/eventos/${eventoId}/participantes`);
+        const { dia, mes } = partesFecha(evento.fecha);
+        document.getElementById("ficha").className = `ficha-evento tipo-${evento.tipo.toLowerCase()}`;
+        document.getElementById("ficha-dia").textContent = dia;
+        document.getElementById("ficha-mes").textContent = mes;
+        document.getElementById("ficha-tipo").textContent = nombreTipo(evento.tipo);
+        document.getElementById("titulo").textContent = evento.titulo;
+        document.getElementById("detalle").innerHTML =
+          `🕒 ${formatoFecha(evento.fecha)} · ${formatoHora(evento.hora_inicio)} – ${formatoHora(evento.hora_fin)} &nbsp;·&nbsp; 📍 ${escapar(evento.lugar)} &nbsp;·&nbsp; 👤 ${escapar(evento.organizador.nombre)} &nbsp; ${etiquetaEstado(evento.estado)}`;
+
+        const activos = participantes.filter((p) => p.estado_inscripcion === "ACTIVA");
+        const asistieron = activos.filter((p) => p.asistencia === "ASISTIO").length;
+        const noAsistieron = activos.filter((p) => p.asistencia === "NO_ASISTIO").length;
+        const porcentaje = activos.length ? Math.round((asistieron * 1000) / activos.length) / 10 : 0;
+        document.getElementById("indicadores").innerHTML = [
+          ["🎫", "violeta", evento.cupo, "Cupo"],
+          ["👥", "cian", activos.length, "Inscritos"],
+          ["🪑", "gris", evento.cupos_disponibles, "Cupos disponibles"],
+          ["✅", "verde", asistieron, "Asistieron"],
+          ["❌", "rojo", noAsistieron, "No asistieron"],
+          ["⏳", "naranja", activos.length - asistieron - noAsistieron, "Sin registro"],
+          ["📈", "destacado", porcentaje + "%", "% de asistencia"],
+        ].map(([ic, c, v, n]) => `<div class="indicador ${c}"><div class="icono">${ic}</div><div><div class="valor">${v}</div><div class="nombre">${n}</div></div></div>`).join("");
+
+        document.getElementById("filas").innerHTML = participantes.length
+          ? participantes.map((p) => `
+            <tr>
+              <td><div class="persona-celda"><span class="avatar">${iniciales(p.nombre)}</span><strong>${escapar(p.nombre)}</strong></div></td>
+              <td>${escapar(p.documento)}</td>
+              <td>${escapar(p.correo)}</td>
+              <td>${etiquetaEstado(p.estado_inscripcion)}</td>
+              <td>${etiquetaEstado(p.asistencia)}</td>
+              <td>${p.estado_inscripcion === "ACTIVA" ? `
+                <div class="selector">
+                  <button class="${p.asistencia === "ASISTIO" ? "marcado-si" : ""}" onclick="registrar(${p.inscripcion_id}, 'ASISTIO')">✔ Asistió</button>
+                  <button class="${p.asistencia === "NO_ASISTIO" ? "marcado-no" : ""}" onclick="registrar(${p.inscripcion_id}, 'NO_ASISTIO')">✖ No asistió</button>
+                </div>` : `<span class="secundario-texto">Inscripción cancelada</span>`}</td>
+            </tr>`).join("")
+          : `<tr><td colspan="6" class="vacio"><span class="emoji">🪑</span>Este evento no tiene inscritos.</td></tr>`;
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    }
+
+    async function registrar(inscripcionId, estado) {
+      try {
+        const fila = await api(`/api/eventos/${eventoId}/asistencia/${inscripcionId}`, { metodo: "PUT", datos: { estado } });
+        mostrarMensaje(`Asistencia de ${fila.nombre}: ${ETIQUETAS_ESTADO[fila.asistencia]}.`);
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+      cargar();
+    }
+
+    cargar();
+  </script>
+</body>
+</html>
