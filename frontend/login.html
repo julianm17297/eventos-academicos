@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iniciar sesión</title>
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="js/api.js"></script>
+</head>
+<body>
+  <nav id="menu"></nav>
+  <div class="acceso">
+    <section class="acceso-arte">
+      <div>
+        <span class="logo" style="display:inline-grid;place-items:center;width:52px;height:52px;border-radius:16px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);font-size:1.6rem">🎓</span>
+        <h1 style="margin-top:18px">Organiza, inscríbete y participa</h1>
+        <p>La plataforma de eventos académicos de la institución: conferencias, talleres, seminarios y capacitaciones en un solo lugar.</p>
+      </div>
+      <ul class="ventajas">
+        <li><span>📅</span> Catálogo con cupos en tiempo real</li>
+        <li><span>🎟️</span> Inscripción en un clic, sin cruces de horario</li>
+        <li><span>✅</span> Registro de asistencia el día del evento</li>
+        <li><span>📊</span> Reportes de asistencia por actividad y periodo</li>
+      </ul>
+    </section>
+
+    <section class="acceso-formulario">
+      <div class="pestanas">
+        <button id="pestana-login" class="activa" onclick="verFormulario('login')">Iniciar sesión</button>
+        <button id="pestana-registro" onclick="verFormulario('registro')">Crear cuenta</button>
+      </div>
+
+      <h2 id="titulo-acceso">¡Bienvenido de nuevo! 👋</h2>
+      <div class="nota-dominio">🏛️ Solo personas de la institución (correo @institucion.edu.co).</div>
+      <div id="mensaje" hidden></div>
+
+      <form id="form-login" class="formulario">
+        <label>Correo institucional <input name="correo" type="email" required placeholder="nombre@institucion.edu.co" autocomplete="username"></label>
+        <label>Contraseña <input name="clave" type="password" required autocomplete="current-password"></label>
+        <button type="submit">Ingresar →</button>
+      </form>
+
+      <form id="form-registro" class="formulario" hidden>
+        <label>Documento de identidad <input name="documento" required pattern="\d{5,20}" title="Solo números (5 a 20 dígitos)" inputmode="numeric"></label>
+        <label>Nombre completo <input name="nombre" required minlength="3"></label>
+        <label>Correo institucional <input name="correo" type="email" required placeholder="nombre@institucion.edu.co"></label>
+        <label>Contraseña (mínimo 8 caracteres) <input name="clave" type="password" required minlength="8" autocomplete="new-password"></label>
+        <button type="submit">Crear cuenta de participante</button>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    function verFormulario(cual) {
+      document.getElementById("form-login").hidden = cual !== "login";
+      document.getElementById("form-registro").hidden = cual !== "registro";
+      document.getElementById("pestana-login").classList.toggle("activa", cual === "login");
+      document.getElementById("pestana-registro").classList.toggle("activa", cual === "registro");
+      document.getElementById("titulo-acceso").textContent =
+        cual === "login" ? "¡Bienvenido de nuevo! 👋" : "Crea tu cuenta de participante ✨";
+      ocultarMensaje();
+    }
+
+    function paginaInicial(rol) {
+      const volver = new URLSearchParams(location.search).get("volver");
+      if (volver && volver.startsWith("/")) return volver;
+      return { PARTICIPANTE: "index.html", ORGANIZADOR: "gestion.html", COORDINACION: "reportes.html" }[rol];
+    }
+
+    document.getElementById("form-login").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const datos = Object.fromEntries(new FormData(ev.target));
+      try {
+        const respuesta = await api("/api/auth/login", { metodo: "POST", datos });
+        guardarSesion(respuesta.token, respuesta.usuario);
+        window.location.href = paginaInicial(respuesta.usuario.rol);
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    });
+
+    document.getElementById("form-registro").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const datos = Object.fromEntries(new FormData(ev.target));
+      try {
+        await api("/api/auth/registro", { metodo: "POST", datos });
+        verFormulario("login");
+        document.querySelector("#form-login [name=correo]").value = datos.correo;
+        mostrarMensaje("Cuenta creada. Ahora puede iniciar sesión.");
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    });
+  </script>
+</body>
+</html>

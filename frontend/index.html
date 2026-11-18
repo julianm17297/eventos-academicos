@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catálogo de eventos</title>
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="js/api.js"></script>
+</head>
+<body>
+  <nav id="menu"></nav>
+  <main>
+    <section class="portada">
+      <span class="etiqueta-superior">Agenda académica</span>
+      <h1>Catálogo de eventos académicos</h1>
+      <p>Conferencias, talleres, seminarios y capacitaciones de la institución. Revise los cupos disponibles e inscríbase antes de la fecha límite.</p>
+      <div class="cifras" id="cifras"></div>
+      <p class="actualizado" id="actualizado"></p>
+    </section>
+
+    <div id="mensaje" hidden></div>
+
+    <div class="filtros">
+      <div class="chips" id="chips-tipo">
+        <button class="chip activo" data-tipo="">✨ Todos</button>
+        <button class="chip" data-tipo="CONFERENCIA">🎤 Conferencias</button>
+        <button class="chip" data-tipo="TALLER">🛠️ Talleres</button>
+        <button class="chip" data-tipo="SEMINARIO">📚 Seminarios</button>
+        <button class="chip" data-tipo="CAPACITACION">🩺 Capacitaciones</button>
+      </div>
+      <label class="interruptor">
+        <input type="checkbox" id="filtro-pasados"> Incluir eventos pasados
+      </label>
+      <button class="secundario pequeno" onclick="cargarEventos()" title="Volver a consultar los cupos">↻ Actualizar</button>
+    </div>
+
+    <div id="eventos" class="rejilla"></div>
+  </main>
+
+  <script>
+    const usuario = obtenerUsuario();
+    let tipoSeleccionado = "";
+    let ultimoHtml = "";
+    let misEventos = new Set(); // eventos donde el participante ya tiene inscripción activa
+
+    // Insignias que ve TODA persona (con o sin sesión, inscrita o no).
+    function insignias(e) {
+      const lista = [etiquetaEstado(e.estado)];
+      if (e.estado === "CANCELADO") return lista.join("");
+      if (misEventos.has(e.id)) lista.push(`<span class="insignia insignia-inscrito">✔ Estás inscrito</span>`);
+      if (e.fecha === hoyIso()) lista.push(`<span class="insignia insignia-hoy">📍 Es hoy</span>`);
+      if (e.cupos_disponibles === 0) {
+        lista.push(`<span class="insignia insignia-agotado">⛔ Cupo agotado</span>`);
+      } else if (!e.inscripciones_abiertas) {
+        lista.push(`<span class="insignia insignia-cerrado">🔒 Inscripciones cerradas</span>`);
+      } else if (e.cupos_disponibles <= Math.max(1, Math.ceil(e.cupo * 0.2))) {
+        lista.push(`<span class="insignia insignia-ultimos">🔥 Últimos cupos</span>`);
+      }
+      return lista.join("");
+    }
+
+    function botonAccion(e) {
+      if (e.estado === "CANCELADO") return `<button disabled>Evento cancelado</button>`;
+      if (!usuario) return `<a class="boton-enlace" href="login.html">Inicia sesión para inscribirte</a>`;
+      if (usuario.rol !== "PARTICIPANTE") return "";
+      if (misEventos.has(e.id)) return `<a class="boton-enlace inscrito" href="mis-inscripciones.html">✔ Ya inscrito · ver mis inscripciones</a>`;
+      if (e.inscripciones_abiertas) return `<button onclick="inscribirse(${e.id})">Inscribirme</button>`;
+      return `<button disabled>${e.cupos_disponibles === 0 ? "Cupo agotado" : "Inscripciones cerradas"}</button>`;
+    }
+
+    function tarjeta(e, i) {
+      const ocupacion = Math.min(100, Math.round((e.inscritos / e.cupo) * 100));
+      const { dia, mes } = partesFecha(e.fecha);
+      const clase = (e.tipo || "").toLowerCase();
+      let cinta = "";
+      if (e.estado === "CANCELADO") cinta = `<div class="cinta gris">🚫 Evento cancelado</div>`;
+      else if (e.cupos_disponibles === 0) cinta = `<div class="cinta">⛔ Cupo agotado</div>`;
+      return `
+        <article class="tarjeta tipo-${clase} ${e.estado === "CANCELADO" ? "cancelado" : ""} ${cinta ? "con-cinta" : ""}" style="animation-delay:${i * 45}ms">
+          ${cinta}
+          <div class="cabecera">
+            <span class="chip-tipo">${nombreTipo(e.tipo)}</span>
+            <div class="fecha-bloque"><b>${dia}</b><span>${mes}</span></div>
+          </div>
+          <div class="cuerpo">
+            <div class="insignias">${insignias(e)}</div>
+            <h3>${escapar(e.titulo)}</h3>
+            <ul class="datos">
+              <li><span>🕒</span><span>${formatoFecha(e.fecha)} · ${formatoHora(e.hora_inicio)} – ${formatoHora(e.hora_fin)}</span></li>
+              <li><span>📍</span><span>${escapar(e.lugar)}</span></li>
+              <li><span>👤</span><span>${escapar(e.organizador.nombre)}</span></li>
+              <li><span>⏳</span><span>Inscripciones hasta el ${formatoFecha(e.fecha_limite_inscripcion)}</span></li>
+            </ul>
+            ${e.descripcion ? `<p class="descripcion">${escapar(e.descripcion)}</p>` : ""}
+            <div class="cupos">
+              <div class="cupos-texto">
+                <span>Cupos disponibles</span>
+                <strong>${e.cupos_disponibles} de ${e.cupo}</strong>
+              </div>
+              <div class="barra ${nivelOcupacion(e.inscritos, e.cupo)}" title="${ocupacion}% ocupado"><div style="width:${ocupacion}%"></div></div>
+              <small>${e.inscritos} ${e.inscritos === 1 ? "persona inscrita" : "personas inscritas"} · ${ocupacion}% ocupado</small>
+            </div>
+            <div class="acciones">${botonAccion(e)}</div>
+          </div>
+        </article>`;
+    }
+
+    function pintarCifras(eventos) {
+      const vigentes = eventos.filter((e) => e.estado === "PUBLICADO" && e.fecha >= hoyIso());
+      const abiertos = vigentes.filter((e) => e.inscripciones_abiertas).length;
+      const cupos = vigentes.reduce((t, e) => t + e.cupos_disponibles, 0);
+      document.getElementById("cifras").innerHTML = [
+        [vigentes.length, "eventos próximos"],
+        [abiertos, "con inscripción abierta"],
+        [cupos, "cupos disponibles"],
+      ].map(([v, n]) => `<div class="cifra"><strong>${v}</strong><span>${n}</span></div>`).join("");
+    }
+
+    async function cargarEventos() {
+      const pasados = document.getElementById("filtro-pasados").checked;
+      const parametros = new URLSearchParams();
+      if (tipoSeleccionado) parametros.set("tipo", tipoSeleccionado);
+      if (pasados) parametros.set("incluir_pasados", "true");
+      const contenedor = document.getElementById("eventos");
+      try {
+        if (usuario?.rol === "PARTICIPANTE") {
+          const mias = await api("/api/inscripciones/mias");
+          misEventos = new Set(mias.filter((i) => i.estado === "ACTIVA").map((i) => i.evento.id));
+        }
+        const eventos = await api("/api/eventos?" + parametros);
+        if (!tipoSeleccionado && !pasados) pintarCifras(eventos);
+        const html = eventos.length
+          ? eventos.map(tarjeta).join("")
+          : `<div class="panel vacio" style="grid-column:1/-1"><span class="emoji">🗓️</span>No hay eventos publicados con ese filtro.</div>`;
+        // Solo se vuelve a dibujar si algo cambió (evita parpadeos en la actualización automática).
+        if (html !== ultimoHtml) {
+          contenedor.innerHTML = html;
+          ultimoHtml = html;
+        }
+        document.getElementById("actualizado").textContent =
+          "🔄 Cupos actualizados a las " + new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    }
+
+    async function inscribirse(id) {
+      try {
+        const inscripcion = await api(`/api/eventos/${id}/inscripciones`, { metodo: "POST" });
+        mostrarMensaje(`Inscripción registrada en «${inscripcion.evento.titulo}».`);
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+      cargarEventos();
+    }
+
+    document.getElementById("chips-tipo").addEventListener("click", (ev) => {
+      const chip = ev.target.closest(".chip");
+      if (!chip) return;
+      tipoSeleccionado = chip.dataset.tipo;
+      document.querySelectorAll("#chips-tipo .chip").forEach((c) => c.classList.toggle("activo", c === chip));
+      cargarEventos();
+    });
+    document.getElementById("filtro-pasados").addEventListener("change", cargarEventos);
+
+    // El catálogo se mantiene al día solo: al volver a la pestaña y cada 20 segundos.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) cargarEventos(); });
+    window.addEventListener("pageshow", (ev) => { if (ev.persisted) cargarEventos(); });
+    setInterval(() => { if (!document.hidden) cargarEventos(); }, 20000);
+
+    cargarEventos();
+  </script>
+</body>
+</html>
