@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mis inscripciones</title>
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="js/api.js"></script>
+</head>
+<body>
+  <nav id="menu"></nav>
+  <main>
+    <div class="encabezado">
+      <div>
+        <h1>🎟️ Mis inscripciones</h1>
+        <p class="subtitulo">Actividades en las que se ha inscrito, su estado y su asistencia.</p>
+      </div>
+      <a class="boton-enlace" href="index.html">📅 Ir al catálogo</a>
+    </div>
+    <div id="mensaje" hidden></div>
+
+    <div class="indicadores" id="indicadores"></div>
+
+    <div class="tabla-contenedor">
+      <table>
+        <thead>
+          <tr><th>Evento</th><th>Horario</th><th>Lugar</th><th>Inscripción</th><th>Asistencia</th><th></th></tr>
+        </thead>
+        <tbody id="filas"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    exigirRol("PARTICIPANTE");
+
+    async function cargar() {
+      try {
+        const inscripciones = await api("/api/inscripciones/mias");
+        const activas = inscripciones.filter((i) => i.estado === "ACTIVA");
+        document.getElementById("indicadores").innerHTML = [
+          ["🎟️", "violeta", activas.length, "Inscripciones activas"],
+          ["📅", "cian", activas.filter((i) => i.evento.fecha >= hoyIso() && i.evento.estado === "PUBLICADO").length, "Próximos eventos"],
+          ["✅", "verde", inscripciones.filter((i) => i.asistencia === "ASISTIO").length, "Asistencias"],
+          ["↩️", "gris", inscripciones.filter((i) => i.estado === "CANCELADA").length, "Canceladas"],
+        ].map(([ic, c, v, n]) => `<div class="indicador ${c}"><div class="icono">${ic}</div><div><div class="valor">${v}</div><div class="nombre">${n}</div></div></div>`).join("");
+
+        const filas = document.getElementById("filas");
+        if (!inscripciones.length) {
+          filas.innerHTML = `<tr><td colspan="6" class="vacio"><span class="emoji">🎒</span>Aún no tiene inscripciones. Vaya al catálogo para inscribirse.</td></tr>`;
+          return;
+        }
+        filas.innerHTML = inscripciones.map((i) => {
+          const { dia, mes } = partesFecha(i.evento.fecha);
+          return `
+          <tr>
+            <td>
+              <div class="celda-evento">
+                <div class="mini-fecha tipo-${(i.evento.tipo || "").toLowerCase()}"><b>${dia}</b><span>${mes}</span></div>
+                <div><strong>${escapar(i.evento.titulo)}</strong><span class="secundario-texto">${nombreTipo(i.evento.tipo)} · ${etiquetaEstado(i.evento.estado)}</span></div>
+              </div>
+            </td>
+            <td>${formatoFecha(i.evento.fecha)}<span class="secundario-texto">🕒 ${formatoHora(i.evento.hora_inicio)} – ${formatoHora(i.evento.hora_fin)}</span></td>
+            <td>📍 ${escapar(i.evento.lugar)}</td>
+            <td>${etiquetaEstado(i.estado)}</td>
+            <td>${etiquetaEstado(i.asistencia)}</td>
+            <td>${i.estado === "ACTIVA" ? `<button class="peligro pequeno" onclick="cancelar(${i.id})">Cancelar inscripción</button>` : ""}</td>
+          </tr>`;
+        }).join("");
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+    }
+
+    async function cancelar(id) {
+      if (!confirm("¿Seguro que desea cancelar esta inscripción? El cupo quedará libre para otra persona.")) return;
+      try {
+        await api(`/api/inscripciones/${id}/cancelar`, { metodo: "PATCH" });
+        mostrarMensaje("Inscripción cancelada. El cupo quedó disponible.");
+      } catch (error) {
+        mostrarMensaje(error.message, "error");
+      }
+      cargar();
+    }
+
+    cargar();
+  </script>
+</body>
+</html>
